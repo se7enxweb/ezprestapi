@@ -1,6 +1,6 @@
 {
     "name": "se7enxweb/ezprestapi",    
-    "description": "7x eZ Publish REST API v2 is a simple eZ Publish Platform (Legacy) REST API extension which replaces the ezrestapiprovider extension entierly. Provides REST API CRUD End Points via HTTP/S. Great for modern developers!",
+    "description": "7x Exponential REST API v2 is a simple Exponential Platform (Legacy) REST API extension which replaces the ezrestapiprovider extension entierly. Provides REST API CRUD End Points via HTTP/S. Great for modern developers!",
     "keywords": [ "eZ Publish", "eZ Publish Legacy", "eZ Publish Platform", "rest api", "classes", "v2", "extension", "content", "create", "update", "delete", "list", "CRUD" ],
     "homepage": "https://github.com/se7enxweb/ezprestapi",
     "type": "ezpublish-legacy-extension",
