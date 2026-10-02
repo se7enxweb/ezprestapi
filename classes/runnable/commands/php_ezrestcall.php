@@ -2,6 +2,7 @@
 /**
  * The code of extension/ezprestapi/bin/php/ezrestcall.php, moved into a class (#207 stage 1). The file extension/ezprestapi/bin/php/ezrestcall.php is one call to it.
  * Guide: doc/bc/6.0/cli_cronjob_view_abstractions.md
+ * @description Call the Exponential REST API of a host with an OAuth token (--host, --token, --action, --uri)
  */
 /*
  * The original header of extension/ezprestapi/bin/php/ezrestcall.php:
