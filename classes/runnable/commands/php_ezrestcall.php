@@ -31,15 +31,15 @@ class Ezrestcall extends \Exponential\Runnable\Command
         unset( $__name );
 
         // Load cli and script environment
-        $cli = \eZCLI::instance();
-        $script = \eZScript::instance( array( 'description' => ( "eZ Publish Rest Content Creator Handler\nAllows for easy publishing via rest apis of eZ Publish Legacy\n Example: ./bin/php/ezrestcall.php --host=digg.one" ),
+        $cli = $this->cli();
+        $script = $this->script( array( 'description' => ( "eZ Publish Rest Content Creator Handler\nAllows for easy publishing via rest apis of eZ Publish Legacy\n Example: ./bin/php/ezrestcall.php --host=digg.one" ),
                                              'use-session' => true,
                                              'use-modules' => true,
                                              'use-extensions' => true ) ); 
         $script->startup();
 
         // Fetch default script options
-        $options = $script->getOptions( "[host:][token:][action:][uri:]",
+        $options = $this->options( "[host:][token:][action:][uri:]",
                                         "",
         				array( 'host' => 'host domain name no protocol',
                                                'token' => 'Oauth Token Key',
