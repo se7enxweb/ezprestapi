@@ -7,6 +7,21 @@
  * @license For full copyright and license information view LICENSE file distributed with this source code.
  */
 
+/**
+ * The routes of the ezp provider.
+ *
+ * Reads answer at v1 and v2: v1 is the API of ezprestapiprovider that existing clients call
+ * (/api/ezp/v1/content/node/<id>/list/...), and this provider replaces that one for the ezp prefix, so it keeps
+ * v1 alive. Writes answer at v2 only:
+ *
+ *   POST          /content/node/create            create below parentNodeID
+ *   POST          /content/node/:nodeId           update (UpdateContentNode)
+ *   POST, DELETE  /content/node/delete/:nodeId    remove the node's object
+ *
+ * Serving one route for several versions needs a kernel whose ezpRestVersionedRoute takes a list of versions
+ * (Exponential 6.0.15 and later), which also tries the next route when one matches the path but not the method.
+ * On an older kernel the routes are registered for v2 alone, as before.
+ */
 class ezp7xRestApiProvider implements ezpRestProviderInterface
 {
     /**
@@ -16,12 +31,15 @@ class ezp7xRestApiProvider implements ezpRestProviderInterface
      */
     public function getRoutes()
     {
+        $modern = self::kernelTakesVersionLists();
+        $read = $modern ? array( 1, 2 ) : 2;
+
         $routes = array(
             'ezpListAtom' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/node/:nodeId/listAtom', 'ezpRestAtomController',
                     array( 'http-get' => 'collection' )
-                ), 2
+                ), $read
             ),
             'ezpNodeCreate' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
@@ -33,7 +51,7 @@ class ezp7xRestApiProvider implements ezpRestProviderInterface
             'ezpNodeDelete' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/node/delete/:nodeId', 'ezp7xRestContentController',
-                    array( 'http-post' => 'DeleteContentNode' )
+                    array( 'http-post' => 'DeleteContentNode', 'http-delete' => 'DeleteContentNode' )
                 ),
                 2
             ),
@@ -43,64 +61,94 @@ class ezp7xRestApiProvider implements ezpRestProviderInterface
                     '@^/content/node/(?P<nodeId>\d+)/list(?:/offset/(?P<offset>\d+))?(?:/limit/(?P<limit>\d+))?(?:/sort/(?P<sortKey>\w+)(?:/(?P<sortType>asc|desc))?)?$@',
                     'ezp7xRestContentController', array( 'http-get' => 'list' )
                 ),
-                2
+                $read
             ),
-            'ezpNode' => new ezpRestVersionedRoute(
+        );
+
+        if ( $modern )
+        {
+            // one route per method set: the read answers at v1 and v2, the update at v2 only
+            $routes['ezpNode'] = new ezpRestVersionedRoute(
+                new ezpMvcRailsRoute( '/content/node/:nodeId', 'ezp7xRestContentController', array( 'http-get' => 'viewContent' ) ),
+                $read
+            );
+            $routes['ezpNodeUpdate'] = new ezpRestVersionedRoute(
+                new ezpMvcRailsRoute( '/content/node/:nodeId', 'ezp7xRestContentController', array( 'http-post' => 'UpdateContentNode' ) ),
+                2
+            );
+        }
+        else
+        {
+            $routes['ezpNode'] = new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/node/:nodeId', 'ezp7xRestContentController',
-                    array( 'http-get' => 'viewContent',
-		           'http-post' => 'UpdateContentNode' )
+                    array( 'http-get' => 'viewContent', 'http-post' => 'UpdateContentNode' )
                 ),
                 2
-            ),
+            );
+        }
+
+        // the field, count and object reads run in this extension's controller too, so they get its checks
+        $routes += array(
             'ezpFieldsByNode' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
-                    '/content/node/:nodeId/fields', 'ezpRestContentController',
+                    '/content/node/:nodeId/fields', 'ezp7xRestContentController',
                     array( 'http-get' => 'viewFields' )
                 ),
-                2
+                $read
             ),
             'ezpFieldByNode' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/node/:nodeId/field/:fieldIdentifier',
-                    'ezpRestContentController',
+                    'ezp7xRestContentController',
                     array( 'http-get' => 'viewField' )
                 ),
-                2
+                $read
             ),
             'ezpChildrenCount' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/node/:nodeId/childrenCount',
-                    'ezpRestContentController',
+                    'ezp7xRestContentController',
                     array( 'http-get' => 'countChildren' )
                 ),
-                2
+                $read
             ),
             'ezpObject' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
-                    '/content/object/:objectId', 'ezpRestContentController',
+                    '/content/object/:objectId', 'ezp7xRestContentController',
                     array( 'http-get' => 'viewContent' )
                 ),
-                2
+                $read
             ),
             'ezpFieldsByObject' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/object/:objectId/fields',
-                    'ezpRestContentController',
+                    'ezp7xRestContentController',
                     array( 'http-get' => 'viewFields' )
                 ),
-                2
+                $read
             ),
             'ezpFieldByObject' => new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/object/:objectId/field/:fieldIdentifier',
-                    'ezpRestContentController',
+                    'ezp7xRestContentController',
                     array( 'http-get' => 'viewField' )
                 ),
-                2
+                $read
             )
         );
         return $routes;
+    }
+
+    /**
+     * Whether the kernel's versioned routes take a list of versions (and its router tries the next route when
+     * one matches the path but not the method).
+     *
+     * @return bool
+     */
+    public static function kernelTakesVersionLists()
+    {
+        return method_exists( 'ezpRestVersionedRoute', 'getVersions' );
     }
 
     /**

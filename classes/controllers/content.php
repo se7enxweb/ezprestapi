@@ -35,228 +35,173 @@ class ezp7xRestContentController extends ezpRestMvcController
           VIEWLIST_RESPONSEGROUP_FIELDS = 'Fields';
 
     /**
-     * Handles content requests per node or object ID
+     * The status of a refused call, with a JSON body: {"error": "<reason>", "error_message": "<text>"}.
      *
-     * Requests:
-     * - POST /api/content/node/XXX
-     * - POST /api/content/object/XXX
+     * @param int $code 400, 403, 404, 500, 501
+     * @param string $reason invalid_request, access_denied, not_found, failed, not_implemented
+     * @param string $message
+     * @return ezpRestMvcResult
+     */
+    protected function errorResult( $code, $reason, $message )
+    {
+        $result = new ezpRestMvcResult();
+        $result->status = new ezpRestStatusResponse( (int)$code, array( 'error' => $reason, 'error_message' => $message ) );
+        return $result;
+    }
+
+    /**
+     * The current user's rights for $action on the content of this request, checked the way the content module
+     * checks them (expRestContentPermission of the kernel), whatever the request was authenticated with: an
+     * OAuth token, a personal API key, HTTP basic authentication, or the anonymous user.
      *
-     * Required HTTP parameters:
-     * - node details
-     * - fields / attributes
+     * @param string $action read, create, edit or remove
+     * @param array $params nodeId, objectId, parentNodeID, classIdentifier, languageLocale
+     * @return ezpRestMvcResult|null a refusal (400, 403, 404), or null to go on
+     */
+    protected function refusal( $action, array $params )
+    {
+        if ( !class_exists( 'expRestContentPermission' ) )
+        {
+            // reads are still checked by ezpContent (content/read); a write is refused rather than run unchecked
+            if ( $action === 'read' )
+                return null;
+            return $this->errorResult( 403, 'access_denied', 'This installation cannot check the rights of a REST write: ezprestapi 1.2.5 needs Exponential 6.0.15 or later.' );
+        }
+        $refusal = expRestContentPermission::check( $action, $params );
+        return $refusal === null ? null : $this->errorResult( $refusal['status'], $refusal['reason'], $refusal['message'] );
+    }
+
+    /**
+     * The read check of the node or object of this request.
      *
-     * Optional HTTP parameters:
-     * - translation=xxx-XX: an optionally forced locale to return
+     * @return ezpRestMvcResult|null
+     */
+    protected function readRefusal()
+    {
+        $params = array();
+        if ( isset( $this->nodeId ) )
+            $params['nodeId'] = $this->nodeId;
+        else if ( isset( $this->objectId ) )
+            $params['objectId'] = $this->objectId;
+        return $this->refusal( 'read', $params );
+    }
+
+    /**
+     * The POST fields of the request (parentNodeID, classIdentifier, languageLocale and the attribute values).
+     *
+     * @return array
+     */
+    protected function postFields()
+    {
+        return is_array( $this->request->post ) ? $this->request->post : array();
+    }
+
+    /**
+     * Updates the content of a node
+     *
+     * Request:
+     * - POST /api/ezp/v2/content/node/XXX
+     *
+     * Checks content/edit of the node (in languageLocale, when one is posted) and answers 403 without it. Updating
+     * the attribute values is not implemented: an allowed call answers 501 and changes nothing.
      *
      * @return ezpRestMvcResult
      */
     public function doUpdateContentNode()
     {
-        $this->setDefaultResponseGroups( array( self::VIEWCONTENT_RESPONSEGROUP_METADATA ) );
-        $isNodeRequested = false;
-	
-        if ( isset( $this->nodeId ) )
-        {
-            $contentNode = eZContentObjectTreeNode::fetch( $this->nodeId );
-            $content = eZContentObjectTreeNode::fetch( $this->nodeId )->attribute( 'object' );
-            $contentParent = eZContentObjectTreeNode::fetch( $this->nodeId )->fetchParent();
-            $isNodeRequested = true;
-        }
-/*        else if ( isset( $this->objectId ) )
-        {
-            $content = ezpContent::fromObjectId( $this->objectId );
-        }*/
+        $post = $this->postFields();
+        $params = array( 'nodeId' => isset( $this->nodeId ) ? $this->nodeId : null );
+        if ( isset( $post['languageLocale'] ) )
+            $params['languageLocale'] = $post['languageLocale'];
+        if ( ( $refused = $this->refusal( 'edit', $params ) ) !== null )
+            return $refused;
 
-        
-	/**
-	 * Updates content object
-	 *
-	 * @param $params array(
-	 *     'object'                  => eZContentObject         Content object
-	 *     'attributes'              => array(                  Content object`s attributes
-	 *         string identifier => string stringValue
-	 *     ),
-	 *     'parentNode'              => eZContentObjectTreeNode Parent node object, not necessary
-	 *     'parentNodeID'            => int                     Content object`s parent node ID, not necessary
-	 *     'additionalParentNodeIDs' => array                   additionalParentNodeIDs, Additional parent node ids
-	 *     'visibility'              => bool                    Nodes visibility
-	 * )
-	 * @return bool true if object was updated, otherwise false
-	 */
-
-        $http = eZHTTPTool::instance();
-	$pc = new nxcPowerContent( false, true );
-
-	$visibility = true;
-
-  	$user = eZUser::currentUser();
-  	$userID = $user->attribute( 'contentobject_id' );
-
-	// return var_dump($userID); die();
-
-
-
-	// you need the NodeID (parent node)
-	/*
-	if (!$http->hasPostVariable( 'NodeID')) {
-	    $pc->error( 'Missing mandatory parameter NodeID (the parent nodeid) so I know where to create it' );
-	} else {
-	    $nodeID = $http->postVariable( 'NodeID');
-	}
-	*/
-        $attributes = $_POST;
-	
-        //return var_dump($attributes); die();
-
-	$updateObjectParams = array(
-	'object' => $content,
-	'attributes' => $attributes,
-	'parentNode' => $contentParent,
-	'visibility' => $visibility
-	);
-	//return var_dump( $pc->updateObject( $updateObjectParams ) ); die('fin');
-
-        $result = new ezpRestMvcResult();
-         
-        throw new ezpContentFieldNotFoundException( "'$this->nodeId' has been updated we don't know if it worked how do you feel?" );
-        return $result;
+        return $this->errorResult( 501, 'not_implemented', 'Updating content over REST is not implemented yet; node ' . (int)$this->nodeId . ' is unchanged.' );
     }
 
     /**
-     * Handles content requests per node or object ID
+     * Removes the object of a node, with all its locations and what is below them
      *
      * Requests:
-     * - POST /api/content/node/XXX
-     * - POST /api/content/object/XXX
+     * - POST /api/ezp/v2/content/node/delete/XXX
+     * - DELETE /api/ezp/v2/content/node/delete/XXX
      *
-     * Required HTTP parameters:
-     * - node details
-     * - fields / attributes
-     *
-     * Optional HTTP parameters:
-     * - translation=xxx-XX: an optionally forced locale to return
+     * Checks content/remove of every location of the object and of everything below them, as the content module
+     * does before a removal, and answers 403 without it (nothing is removed then). Answers 200 with
+     * {"message", "nodeId", "objectId"} once removed.
      *
      * @return ezpRestMvcResult
      */
     public function doDeleteContentNode()
     {
-        $this->setDefaultResponseGroups( array( self::VIEWCONTENT_RESPONSEGROUP_METADATA ) );
-        $isNodeRequested = false;
-	
-        if ( isset( $this->nodeId ) )
-        {
-            $contentNode = eZContentObjectTreeNode::fetch( $this->nodeId );
-            $content = eZContentObjectTreeNode::fetch( $this->nodeId )->attribute( 'object' );
-            // $contentParent = eZContentObjectTreeNode::fetch( $this->nodeId )->fetchParent();
-            $isNodeRequested = true;
-        }
-	else if ( isset( $this->objectId ) )
-        {
-            $content = ezpContent::fromObjectId( $this->objectId );
-        }
+        $nodeID = isset( $this->nodeId ) ? $this->nodeId : null;
+        if ( ( $refused = $this->refusal( 'remove', array( 'nodeId' => $nodeID ) ) ) !== null )
+            return $refused;
 
-	$pc = new nxcPowerContent( false, true );
-	$removeResult = $pc->removeObject( $content );
+        $node = eZContentObjectTreeNode::fetch( (int)$nodeID );
+        $object = $node instanceof eZContentObjectTreeNode ? $node->attribute( 'object' ) : null;
+        if ( !$object instanceof eZContentObject )
+            return $this->errorResult( 404, 'not_found', 'The node ' . (int)$nodeID . ' has no object.' );
+        $objectID = (int)$object->attribute( 'id' );
+
+        $pc = new nxcPowerContent( false, true );
+        if ( !$pc->removeObject( $object ) )
+            return $this->errorResult( 500, 'failed', 'The node ' . (int)$nodeID . ' could not be removed.' );
 
         $result = new ezpRestMvcResult();
-         
-        throw new ezpContentFieldNotFoundException( "The nodeId ". $this->nodeId ." has been removed. Please update your records." );
+        $result->status = new ezpRestStatusResponse( 200, array( 'message' => 'Removed', 'nodeId' => (int)$nodeID, 'objectId' => $objectID ) );
         return $result;
     }
 
     /**
-     * Handles content requests per node or object ID
+     * Creates and publishes content below a node
      *
-     * Requests:
-     * - POST /api/content/node/XXX
-     * - POST /api/content/object/XXX
+     * Request:
+     * - POST /api/ezp/v2/content/node/create
      *
-     * Required HTTP parameters:
-     * - node details
-     * - fields / attributes
+     * POST fields: parentNodeID, classIdentifier, languageLocale, and the attribute values by identifier.
      *
-     * Optional HTTP parameters:
-     * - translation=xxx-XX: an optionally forced locale to return
+     * Checks content/create of the class below the parent node in the language (the Class, ParentClass, Section,
+     * Node, Subtree and Language limitations), as the content module does, and answers 403 without it, 400 for a
+     * missing field, an unknown class or language, 404 for an unknown parent. Answers 201 with
+     * {"message", "objectId", "nodeId"} once published.
      *
      * @return ezpRestMvcResult
      */
     public function doCreateContentNode()
     {
-        $http = eZHTTPTool::instance();
+        $post = $this->postFields();
+        $params = array();
+        foreach ( array( 'parentNodeID', 'classIdentifier', 'languageLocale' ) as $name )
+            if ( isset( $post[$name] ) )
+                $params[$name] = $post[$name];
+        if ( !isset( $params['languageLocale'] ) || !is_scalar( $params['languageLocale'] ) || trim( (string)$params['languageLocale'] ) === '' )
+            return $this->errorResult( 400, 'invalid_request', 'The parameter languageLocale (the language to create in, for example eng-US) is missing.' );
+        if ( ( $refused = $this->refusal( 'create', $params ) ) !== null )
+            return $refused;
 
-        $this->setDefaultResponseGroups( array( self::VIEWCONTENT_RESPONSEGROUP_METADATA ) );
-        $isNodeRequested = false;
-	
-	$pc = new nxcPowerContent( false, true );
+        $parentNode = eZContentObjectTreeNode::fetch( (int)$params['parentNodeID'] );
+        $class = eZContentClass::fetchByIdentifier( (string)$params['classIdentifier'] );
 
-	$visibility = true;
+        $attributes = $post;
+        foreach ( array( 'parentNodeID', 'classIdentifier', 'languageLocale' ) as $name )
+            unset( $attributes[$name] );
 
-  	$user = eZUser::currentUser();
-  	$userID = $user->attribute( 'contentobject_id' );
-
-	// you need the NodeID (parent node)
-	if (!$http->hasPostVariable( 'parentNodeID')) {
-	    $pc->error( 'Missing mandatory parameter parentNodeID (the parent nodeid) so I know where to create it' );
-	} else {
-	    $parentNodeID = $http->postVariable( 'parentNodeID');
-	}
-
-	// you need the classIdentifier
-	if (!$http->hasPostVariable( 'classIdentifier')) {
-	    $pc->error( 'Missing mandatory parameter classIdentifier so I know who to create' );
-	} else {
-	    $classIdentifier = $http->postVariable( 'classIdentifier');
-	}
-
-	$class = eZContentClass::fetchByIdentifier( $classIdentifier );
-
-	// you need the classIdentifier
-	if (!$http->hasPostVariable( 'languageLocale')) {
-	    $pc->error( 'Missing mandatory parameter languageLocale so I know who to create' );
-	} else {
-	    $languageLocale = $http->postVariable( 'languageLocale');
-	}
-
-        $attributes = $_POST;
-	
-	/**
-         * Creates new content object and store it
-         *
-         * @param $params array(
-         *     'class'                   => eZContentClass          Content class object
-         *     'classIdentifier'         => string                  Content object`s class identifier, not necessary if class is set
-         *     'parentNode'              => eZContentObjectTreeNode Parent node object
-         *     'parentNodeID'            => int                     Content object`s parent node ID, not necessary if parentNode is set
-         *     'attributes'              => array(                  Content object`s attributes
-         *         string identifier => string stringValue
-         *     ),
-         *     'remoteID'                => string                  Content object`s remote ID, not necessary
-         *     'ownerID'                 => int                     Owner`s content object ID, not necessary
-         *     'sectionID'               => int                     Section ID, not necessary
-         *     'languageLocal'           => string                  Language local, not necessary
-         *     'publishDate'             => int                     Creation timestamp, if not specified - current timestamp will be used
-         *     'additionalParentNodeIDs' => array                   additionalParentNodes, Additional parent node ids
-         *     'versionStatus'           => int                     Published version status, not necessary
-         *     'visibility'              => bool                    Nodes visibility
-         * )
-         * @return eZContentObject|bool Created content object if it was created, otherwise false
-         */
-
-	$parentNode = eZContentObjectTreeNode::fetch( $parentNodeID );
-
-	$createObjectParams = array(
-	'parentNode' => $parentNode,
-	'class' => $class,
-	'languageLocale' => $languageLocale,
-	'attributes' => $attributes,
-	'visibility' => $visibility
-	);
-
-	$pc->createObject( $createObjectParams );
+        $pc = new nxcPowerContent( false, true );
+        $object = $pc->createObject( array(
+            'parentNode' => $parentNode,
+            'class' => $class,
+            'languageLocale' => (string)$params['languageLocale'],
+            'attributes' => $attributes,
+            'visibility' => true
+        ) );
+        if ( !$object instanceof eZContentObject )
+            return $this->errorResult( 500, 'failed', 'The content could not be created.' );
 
         $result = new ezpRestMvcResult();
-        $result->variables['message'] = 'Success: Created Node';
-
+        $result->status = new ezpRestStatusResponse( 201, array( 'message' => 'Created',
+                                                                 'objectId' => (int)$object->attribute( 'id' ),
+                                                                 'nodeId' => (int)$object->attribute( 'main_node_id' ) ) );
         return $result;
     }
 
@@ -274,6 +219,9 @@ class ezp7xRestContentController extends ezpRestMvcController
      */
     public function doViewContent()
     {
+        if ( ( $refused = $this->readRefusal() ) !== null )
+            return $refused;
+
         $this->setDefaultResponseGroups( array( self::VIEWCONTENT_RESPONSEGROUP_METADATA ) );
         $isNodeRequested = false;
         if ( isset( $this->nodeId ) )
@@ -337,6 +285,9 @@ class ezp7xRestContentController extends ezpRestMvcController
      */
     public function doViewFields()
     {
+        if ( ( $refused = $this->readRefusal() ) !== null )
+            return $refused;
+
         $this->setDefaultResponseGroups( array( self::VIEWFIELDS_RESPONSEGROUP_FIELDVALUES ) );
 
         $isNodeRequested = false;
@@ -388,6 +339,9 @@ class ezp7xRestContentController extends ezpRestMvcController
      */
     public function doViewField()
     {
+        if ( ( $refused = $this->readRefusal() ) !== null )
+            return $refused;
+
         $this->setDefaultResponseGroups( array( self::VIEWFIELDS_RESPONSEGROUP_FIELDVALUES ) );
 
         $isNodeRequested = false;
@@ -451,6 +405,9 @@ class ezp7xRestContentController extends ezpRestMvcController
      */
     public function doList()
     {
+        if ( ( $refused = $this->refusal( 'read', array( 'nodeId' => isset( $this->nodeId ) ? $this->nodeId : null ) ) ) !== null )
+            return $refused;
+
         $this->setDefaultResponseGroups( array( self::VIEWLIST_RESPONSEGROUP_METADATA ) );
         $result = new ezpRestMvcResult();
         $crit = new ezpContentCriteria();
@@ -503,6 +460,9 @@ class ezp7xRestContentController extends ezpRestMvcController
      */
     public function doCountChildren()
     {
+        if ( ( $refused = $this->refusal( 'read', array( 'nodeId' => isset( $this->nodeId ) ? $this->nodeId : null ) ) ) !== null )
+            return $refused;
+
         $this->setDefaultResponseGroups( array( self::VIEWLIST_RESPONSEGROUP_METADATA ) );
         $result = new ezpRestMvcResult();
 
