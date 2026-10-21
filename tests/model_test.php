@@ -70,6 +70,36 @@ class ezpRestContentServiceModelTest extends ezpDatabaseTestCase
     }
 
     /**
+     * Tests the children list of a node, with and without the Fields response group.
+     * The list resolves the response group through the controller of this extension, so it must work
+     * without the deprecated ezprestapiprovider extension (a new installation does not activate it).
+     * @group restContentServices
+     */
+    public function testGetChildrenListWithAndWithoutFields()
+    {
+        $criteria = new ezpContentCriteria();
+        $criteria->accept[] = ezpContentCriteria::location()->subtree( ezpContentLocation::fetchByNodeId( 2 ) );
+        $criteria->accept[] = ezpContentCriteria::depth( 1 );
+        $criteria->accept[] = ezpContentCriteria::limit()->offset( 0 )->limit( 2 );
+        $request = new ezpRestRequest();
+
+        $plain = ezpRestContentModel::getChildrenList( $criteria, $request, array( ezp7xRestContentController::VIEWLIST_RESPONSEGROUP_METADATA ) );
+        self::assertInternalType( PHPUnit_Framework_Constraint_IsType::TYPE_ARRAY, $plain );
+        foreach ( $plain as $entry )
+        {
+            self::assertArrayHasKey( 'nodeId', $entry );
+            self::assertArrayNotHasKey( 'fields', $entry, 'Fields are only listed when the Fields response group is requested' );
+        }
+
+        $withFields = ezpRestContentModel::getChildrenList( $criteria, $request, array( ezp7xRestContentController::VIEWLIST_RESPONSEGROUP_FIELDS ) );
+        self::assertSame( count( $plain ), count( $withFields ) );
+        foreach ( $withFields as $entry )
+        {
+            self::assertArrayHasKey( 'fields', $entry, 'The Fields response group lists the fields of every child' );
+        }
+    }
+
+    /**
      * Tests fields returned by model for given content
      * @group restContentServices
      */

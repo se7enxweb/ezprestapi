@@ -198,7 +198,7 @@ class ezpRestContentModel extends ezpRestModel
             $childEntry = array_merge( $childEntry, self::getMetadataByLocation( $childNode->locations ) );
 
             // Add fields with their values if requested
-            if ( in_array( ezpRestContentController::VIEWLIST_RESPONSEGROUP_FIELDS, $responseGroups ) )
+            if ( in_array( ezp7xRestContentController::VIEWLIST_RESPONSEGROUP_FIELDS, $responseGroups ) )
             {
                 $childEntry['fields'] = array();
                 foreach ( $childNode->fields as $fieldName => $field )
