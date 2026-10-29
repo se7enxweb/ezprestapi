@@ -4,7 +4,7 @@
  *
  * @copyright Copyright (C) 1998 - 2026 Exponential Foundation and 7x. All rights reserved.
  * @license http://www.gnu.org/licenses/gpl-2.0.txt GNU General Public License v2.0 (or any later version)
- * @version 1.2.7
+ * @version 1.2.8
  * @package ezprestapi
  */
 class ezprestapiInfo
@@ -13,7 +13,7 @@ class ezprestapiInfo
     {
         return array(
             'Name' => "<a href='https://github.com/se7enxweb/ezprestapi'>7x Exponential REST API v1 and v2 - CRUD APIs</a>",
-            'Version' => "1.2.7",
+            'Version' => "1.2.8",
             'Copyright' => "Copyright (C) 1998 - 2026 Exponential Foundation and 7x. All rights reserved. Copyright (C) 1999 - 2024 <a href='https://se7enx.com'>7x</a> and eZ Systems AS",
             'Author' => "7x",
             'License' => "GNU General Public License v2.0 (or any later version)",
