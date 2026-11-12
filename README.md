@@ -36,4 +36,12 @@ rest.ini maps the same prefixes to `ezp7xRestApiProvider`. To migrate:
 
 Nothing else changes: the v1 URLs, their response bodies, the OAuth clients and tokens stay as they were.
 
-The create, update and delete calls are backed by nxc_powercontent.
+The create, update and delete calls are written by the kernel's `expContentWriter` (Exponential 6.0.15 or later), so
+no other extension is needed; nxc_powercontent is no longer required. On an older kernel the write calls answer 501
+and the reads work as before.
+
+Writes take form fields or a JSON object (`Content-Type: application/json`). Attribute values are text by identifier:
+rich text as HTML, a file as a public http(s) URL (optionally `URL|alternative text`), every other datatype in its
+text form. An update (`POST` or `PUT /api/ezp/v2/content/node/<node id>`) publishes a new version with the values
+sent, keeps the other attributes, and adds a translation when `languageLocale` names a language the object does not
+have yet; it answers 200 with the new version, or 202 when a workflow holds the publication.

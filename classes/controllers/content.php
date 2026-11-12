@@ -87,36 +87,112 @@ class ezp7xRestContentController extends ezpRestMvcController
     }
 
     /**
-     * The POST fields of the request (parentNodeID, classIdentifier, languageLocale and the attribute values).
+     * The POST fields of the request (parentNodeID, classIdentifier, languageLocale and the attribute values): the
+     * form fields, or the members of a JSON object sent as the body (Content-Type: application/json).
      *
      * @return array
      */
     protected function postFields()
     {
-        return is_array( $this->request->post ) ? $this->request->post : array();
+        if ( is_array( $this->request->post ) && $this->request->post )
+            return $this->request->post;
+        $body = isset( $this->request->body ) && is_string( $this->request->body ) ? trim( $this->request->body ) : '';
+        if ( $body !== '' && $body[0] === '{' )
+        {
+            $decoded = json_decode( $body, true );
+            if ( is_array( $decoded ) )
+                return $decoded;
+        }
+        return array();
     }
 
     /**
-     * Updates the content of a node
+     * The REST answer of an expContentWriter result.
      *
-     * Request:
+     * @param array $written status, message, object, version (expContentWriter)
+     * @param int $successCode 200 or 201
+     * @param int $nodeID the node of the request, 0 for the new object's main node
+     * @return ezpRestMvcResult
+     */
+    protected function writeResult( array $written, $successCode, $nodeID = 0 )
+    {
+        if ( $written['status'] === 'invalid' )
+            return $this->errorResult( 400, 'invalid_request', $written['message'] );
+        if ( $written['status'] === 'failed' || !$written['object'] instanceof eZContentObject )
+            return $this->errorResult( 500, 'failed', $written['message'] );
+        $body = array( 'message' => $written['message'],
+                       'objectId' => (int)$written['object']->attribute( 'id' ),
+                       'nodeId' => $nodeID ? (int)$nodeID : (int)$written['object']->attribute( 'main_node_id' ) );
+        if ( $written['version'] )
+            $body['version'] = (int)$written['version'];
+        if ( !empty( $written['languageLocale'] ) )
+            $body['languageLocale'] = $written['languageLocale'];
+        $result = new ezpRestMvcResult();
+        $result->status = new ezpRestStatusResponse( $written['status'] === 'pending' ? 202 : (int)$successCode, $body );
+        return $result;
+    }
+
+    /**
+     * Whether the kernel can write content for REST (Exponential 6.0.15 or later), as a refusal when it cannot.
+     *
+     * @return ezpRestMvcResult|null
+     */
+    protected function writerRefusal()
+    {
+        if ( class_exists( 'expContentWriter' ) )
+            return null;
+        return $this->errorResult( 501, 'not_implemented', 'This installation cannot write content over REST: ezprestapi 1.2.9 needs Exponential 6.0.15 or later.' );
+    }
+
+    /**
+     * Updates the content of a node: publishes a new version of its object with the posted attribute values
+     *
+     * Requests:
      * - POST /api/ezp/v2/content/node/XXX
+     * - PUT /api/ezp/v2/content/node/XXX (or POST with _method=PUT)
      *
-     * Checks content/edit of the node (in languageLocale, when one is posted) and answers 403 without it. Updating
-     * the attribute values is not implemented: an allowed call answers 501 and changes nothing.
+     * Fields (form fields or a JSON object): languageLocale (optional, the object's main language by default; a
+     * language the object does not have yet adds that translation), and the attribute values by identifier, in the
+     * format of a create (rich text as HTML, a file as a public http(s) URL, everything else as the attribute's text
+     * form). Attributes left out keep their values.
+     *
+     * Checks content/edit of the node in the language, as the content module does, and answers 403 without it; 404
+     * for an unknown node; 400 for no attribute values, an unknown attribute, a value that is not text, a file that is
+     * not a public URL or an unknown language. The new version is published through the publish operation, so
+     * workflows run. Answers 200 with {"message", "objectId", "nodeId", "version", "languageLocale"} once published,
+     * or 202 when a workflow holds the publication (the version then waits there).
      *
      * @return ezpRestMvcResult
      */
     public function doUpdateContentNode()
     {
         $post = $this->postFields();
-        $params = array( 'nodeId' => isset( $this->nodeId ) ? $this->nodeId : null );
-        if ( isset( $post['languageLocale'] ) )
-            $params['languageLocale'] = $post['languageLocale'];
-        if ( ( $refused = $this->refusal( 'edit', $params ) ) !== null )
+        unset( $post['_method'] );
+        $nodeID = isset( $this->nodeId ) ? (int)$this->nodeId : 0;
+        $node = eZContentObjectTreeNode::fetch( $nodeID );
+        $object = $node instanceof eZContentObjectTreeNode ? $node->attribute( 'object' ) : null;
+        if ( !$object instanceof eZContentObject )
+            return $this->errorResult( 404, 'not_found', 'The node ' . $nodeID . ' does not exist.' );
+
+        if ( isset( $post['languageLocale'] ) && ( !is_scalar( $post['languageLocale'] ) || trim( (string)$post['languageLocale'] ) === '' ) )
+            return $this->errorResult( 400, 'invalid_request', 'The parameter languageLocale must be a language, for example eng-US.' );
+        $languageCode = isset( $post['languageLocale'] ) ? trim( (string)$post['languageLocale'] ) : '';
+        if ( $languageCode === '' )
+        {
+            $initialLanguage = eZContentLanguage::fetch( $object->attribute( 'initial_language_id' ) );
+            $languageCode = $initialLanguage instanceof eZContentLanguage ? $initialLanguage->attribute( 'locale' ) : '';
+        }
+        if ( !eZContentLanguage::fetchByLocale( $languageCode ) instanceof eZContentLanguage )
+            return $this->errorResult( 400, 'invalid_request', 'The language ' . $languageCode . ' is not a language of this installation.' );
+
+        if ( ( $refused = $this->refusal( 'edit', array( 'nodeId' => $nodeID, 'languageLocale' => $languageCode ) ) ) !== null )
+            return $refused;
+        if ( ( $refused = $this->writerRefusal() ) !== null )
             return $refused;
 
-        return $this->errorResult( 501, 'not_implemented', 'Updating content over REST is not implemented yet; node ' . (int)$this->nodeId . ' is unchanged.' );
+        $values = $post;
+        unset( $values['languageLocale'] );
+        return $this->writeResult( expContentWriter::update( $object, $values, $languageCode ), 200, $nodeID );
     }
 
     /**
@@ -137,6 +213,8 @@ class ezp7xRestContentController extends ezpRestMvcController
         $nodeID = isset( $this->nodeId ) ? $this->nodeId : null;
         if ( ( $refused = $this->refusal( 'remove', array( 'nodeId' => $nodeID ) ) ) !== null )
             return $refused;
+        if ( ( $refused = $this->writerRefusal() ) !== null )
+            return $refused;
 
         $node = eZContentObjectTreeNode::fetch( (int)$nodeID );
         $object = $node instanceof eZContentObjectTreeNode ? $node->attribute( 'object' ) : null;
@@ -144,8 +222,8 @@ class ezp7xRestContentController extends ezpRestMvcController
             return $this->errorResult( 404, 'not_found', 'The node ' . (int)$nodeID . ' has no object.' );
         $objectID = (int)$object->attribute( 'id' );
 
-        $pc = new nxcPowerContent( false, true );
-        if ( !$pc->removeObject( $object ) )
+        $removed = expContentWriter::remove( $object );
+        if ( $removed['status'] !== 'published' )
             return $this->errorResult( 500, 'failed', 'The node ' . (int)$nodeID . ' could not be removed.' );
 
         $result = new ezpRestMvcResult();
@@ -159,18 +237,20 @@ class ezp7xRestContentController extends ezpRestMvcController
      * Request:
      * - POST /api/ezp/v2/content/node/create
      *
-     * POST fields: parentNodeID, classIdentifier, languageLocale, and the attribute values by identifier.
+     * Fields (form fields or a JSON object): parentNodeID, classIdentifier, languageLocale, and the attribute values
+     * by identifier (rich text as HTML, a file as a public http(s) URL, everything else as the attribute's text form).
      *
      * Checks content/create of the class below the parent node in the language (the Class, ParentClass, Section,
      * Node, Subtree and Language limitations), as the content module does, and answers 403 without it, 400 for a
-     * missing field, an unknown class or language, 404 for an unknown parent. Answers 201 with
-     * {"message", "objectId", "nodeId"} once published.
+     * missing field, an unknown class, attribute or language, 404 for an unknown parent. Answers 201 with
+     * {"message", "objectId", "nodeId", "version"} once published, or 202 when a workflow holds the publication.
      *
      * @return ezpRestMvcResult
      */
     public function doCreateContentNode()
     {
         $post = $this->postFields();
+        unset( $post['_method'] );
         $params = array();
         foreach ( array( 'parentNodeID', 'classIdentifier', 'languageLocale' ) as $name )
             if ( isset( $post[$name] ) )
@@ -179,30 +259,18 @@ class ezp7xRestContentController extends ezpRestMvcController
             return $this->errorResult( 400, 'invalid_request', 'The parameter languageLocale (the language to create in, for example eng-US) is missing.' );
         if ( ( $refused = $this->refusal( 'create', $params ) ) !== null )
             return $refused;
-
-        $parentNode = eZContentObjectTreeNode::fetch( (int)$params['parentNodeID'] );
-        $class = eZContentClass::fetchByIdentifier( (string)$params['classIdentifier'] );
+        if ( ( $refused = $this->writerRefusal() ) !== null )
+            return $refused;
 
         $attributes = $post;
         foreach ( array( 'parentNodeID', 'classIdentifier', 'languageLocale' ) as $name )
             unset( $attributes[$name] );
 
-        $pc = new nxcPowerContent( false, true );
-        $object = $pc->createObject( array(
-            'parentNode' => $parentNode,
-            'class' => $class,
-            'languageLocale' => (string)$params['languageLocale'],
-            'attributes' => $attributes,
-            'visibility' => true
-        ) );
-        if ( !$object instanceof eZContentObject )
-            return $this->errorResult( 500, 'failed', 'The content could not be created.' );
-
-        $result = new ezpRestMvcResult();
-        $result->status = new ezpRestStatusResponse( 201, array( 'message' => 'Created',
-                                                                 'objectId' => (int)$object->attribute( 'id' ),
-                                                                 'nodeId' => (int)$object->attribute( 'main_node_id' ) ) );
-        return $result;
+        return $this->writeResult( expContentWriter::create( array(
+            'parentNodeID' => (int)$params['parentNodeID'],
+            'classIdentifier' => (string)$params['classIdentifier'],
+            'languageLocale' => trim( (string)$params['languageLocale'] ),
+            'attributes' => $attributes ) ), 201 );
     }
 
     /**

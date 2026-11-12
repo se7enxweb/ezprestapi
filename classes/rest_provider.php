@@ -73,7 +73,7 @@ class ezp7xRestApiProvider implements ezpRestProviderInterface
                 $read
             );
             $routes['ezpNodeUpdate'] = new ezpRestVersionedRoute(
-                new ezpMvcRailsRoute( '/content/node/:nodeId', 'ezp7xRestContentController', array( 'http-post' => 'UpdateContentNode' ) ),
+                new ezpMvcRailsRoute( '/content/node/:nodeId', 'ezp7xRestContentController', array( 'http-post' => 'UpdateContentNode', 'http-put' => 'UpdateContentNode' ) ),
                 2
             );
         }
@@ -82,7 +82,7 @@ class ezp7xRestApiProvider implements ezpRestProviderInterface
             $routes['ezpNode'] = new ezpRestVersionedRoute(
                 new ezpMvcRailsRoute(
                     '/content/node/:nodeId', 'ezp7xRestContentController',
-                    array( 'http-get' => 'viewContent', 'http-post' => 'UpdateContentNode' )
+                    array( 'http-get' => 'viewContent', 'http-post' => 'UpdateContentNode', 'http-put' => 'UpdateContentNode' )
                 ),
                 2
             );
